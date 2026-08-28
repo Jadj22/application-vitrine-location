@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@theme inline { --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-border: var(--border); --color-input: var(--input); --color-price: var(--price); --radius-lg: 1.5rem; --radius-xl: 2rem; }
+:root { --background: oklch(0.98 0.008 105); --foreground: oklch(0.19 0.02 160); --card: oklch(1 0 0); --card-foreground: oklch(0.19 0.02 160); --primary: oklch(0.45 0.12 158); --primary-foreground: oklch(0.98 0.01 105); --muted: oklch(0.94 0.015 105); --muted-foreground: oklch(0.48 0.025 155); --border: oklch(0.87 0.02 150); --input: oklch(0.87 0.02 150); --price: oklch(0.55 0.15 145); }
+* { @apply border-border; }
+html { scroll-behavior: smooth; }
+body { @apply bg-background text-foreground; font-family: Arial, sans-serif; }
+button, a { transition: opacity .2s ease, transform .2s ease, background-color .2s ease; }
+button:hover, a:hover { opacity: .82; }
+button:active, a:active { transform: translateY(1px); }
+:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
