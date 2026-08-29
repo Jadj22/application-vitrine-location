@@ -18,6 +18,30 @@ import { fr } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { saveDraft, loadDraft } from "@/lib/draft";
 
+// Validation stricte YYYY-MM-DD — évite Invalid Date côté client
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidDateString(s: unknown): s is string {
+  if (typeof s !== "string" || !DATE_RE.test(s)) return false;
+  const d = new Date(s + "T12:00:00");
+  if (Number.isNaN(d.getTime())) return false;
+  // Re-format pour rejeter 2026-02-30 -> 2026-03-02
+  try {
+    return format(d, "yyyy-MM-dd") === s;
+  } catch {
+    return false;
+  }
+}
+function parseDateSafe(s: string): Date | null {
+  if (!isValidDateString(s)) return null;
+  const d = new Date(s + "T12:00:00");
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function parseDateSafeMidnight(s: string): Date | null {
+  if (!isValidDateString(s)) return null;
+  const d = new Date(s + "T00:00:00");
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 type Props = {
   slug: string;
   initialItems: PublicItem[];
@@ -74,19 +98,35 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
   // Draft: restaurer dates au chargement et sauvegarder à chaque changement (retour arrière, reload)
   useEffect(() => {
     const draft = loadDraft(slug);
-    if (draft?.dates?.from && !dateDebut) setDateDebut(draft.dates.from);
-    if (draft?.dates?.to && !dateFin) setDateFin(draft.dates.to);
+    if (draft?.dates?.from && !dateDebut && isValidDateString(draft.dates.from)) setDateDebut(draft.dates.from);
+    if (draft?.dates?.to && !dateFin && isValidDateString(draft.dates.to)) setDateFin(draft.dates.to);
   }, [slug]);
 
   useEffect(() => {
     if (!dateDebut && !dateFin) return;
+    if (dateDebut && !isValidDateString(dateDebut)) return;
+    if (dateFin && !isValidDateString(dateFin)) return;
     saveDraft(slug, { dates: { from: dateDebut, to: dateFin } });
   }, [slug, dateDebut, dateFin]);
 
   const fetchAvailability = useCallback(async () => {
+    // Cas vide / partiel : reset sans erreur
     if (!dateDebut || !dateFin) {
       setItems(initialItems.map((i) => ({ ...i, total_stock: 0, disponible: 0, peut_reserver: false, reserves_pendant_periode: 0, booking_requests_pendantes: 0, en_entretien: 0, en_stock_physique: 0 })));
       setAvailabilityError(null);
+      return;
+    }
+    // Validation stricte avant construction Date / appel API
+    if (!isValidDateString(dateDebut) || !isValidDateString(dateFin)) {
+      setAvailabilityError("Dates invalides");
+      setItems(initialItems.map((i) => ({ ...i, total_stock: 0, disponible: 0, peut_reserver: false, reserves_pendant_periode: 0, booking_requests_pendantes: 0, en_entretien: 0, en_stock_physique: 0 })));
+      return;
+    }
+    const start = parseDateSafe(dateDebut)!;
+    const end = parseDateSafe(dateFin)!;
+    if (end.getTime() < start.getTime()) {
+      setAvailabilityError("La date de fin doit être après la date de début.");
+      setItems(initialItems.map((i) => ({ ...i, total_stock: 0, disponible: 0, peut_reserver: false, reserves_pendant_periode: 0, booking_requests_pendantes: 0, en_entretien: 0, en_stock_physique: 0 })));
       return;
     }
 
@@ -219,24 +259,30 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
             )}
           >
             <CalendarIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
-            {dateDebut && dateFin ? (
-              <span>
-                {format(new Date(dateDebut + "T12:00:00"), "d MMM yyyy", { locale: fr })} –{" "}
-                {format(new Date(dateFin + "T12:00:00"), "d MMM yyyy", { locale: fr })}
-              </span>
-            ) : dateDebut ? (
-              <span>{format(new Date(dateDebut + "T12:00:00"), "d MMM yyyy", { locale: fr })} – …</span>
-            ) : (
-              <span>Sélectionnez vos dates</span>
-            )}
+            {(() => {
+              const start = parseDateSafe(dateDebut);
+              const end = parseDateSafe(dateFin);
+              if (start && end) {
+                return (
+                  <span>
+                    {format(start, "d MMM yyyy", { locale: fr })} –{" "}
+                    {format(end, "d MMM yyyy", { locale: fr })}
+                  </span>
+                );
+              }
+              if (start) {
+                return <span>{format(start, "d MMM yyyy", { locale: fr })} – …</span>;
+              }
+              return <span>Sélectionnez vos dates</span>;
+            })()}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar
             mode="range"
             selected={{
-              from: dateDebut ? new Date(dateDebut + "T12:00:00") : undefined,
-              to: dateFin ? new Date(dateFin + "T12:00:00") : undefined,
+              from: parseDateSafe(dateDebut) ?? undefined,
+              to: parseDateSafe(dateFin) ?? undefined,
             }}
             onSelect={(range: DateRange | undefined) => {
               const fromStr = range?.from ? format(range.from, "yyyy-MM-dd") : "";
@@ -296,55 +342,63 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
           </div>
         </PopoverContent>
       </Popover>
-      {dateDebut && dateFin && new Date(dateFin) < new Date(dateDebut) && (
-        <p className="mt-2 text-sm text-destructive">La date de fin doit être après la date de début.</p>
-      )}
+      {(() => {
+        if (!isValidDateString(dateDebut) || !isValidDateString(dateFin)) return null;
+        const start = parseDateSafe(dateDebut)!;
+        const end = parseDateSafe(dateFin)!;
+        if (end.getTime() < start.getTime()) {
+          return <p className="mt-2 text-sm text-destructive">La date de fin doit être après la date de début.</p>;
+        }
+        return null;
+      })()}
       {!dateDebut && !dateFin && (
         <p className="mt-1.5 text-xs text-muted-foreground">Sélectionnez d'abord la période pour vérifier la disponibilité</p>
       )}
     </div>
 
     {/* Résumé de la période */}
-    {dateDebut && dateFin && (
-      <div className="mt-4 rounded-xl bg-muted/50 px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm">
-            <span className="text-muted-foreground">Période :</span>{" "}
-            <span className="font-medium">
-              {new Date(`${dateDebut}T00:00:00`).toLocaleDateString("fr-FR", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-            </span>
-            {" → "}
-            <span className="font-medium">
-              {new Date(`${dateFin}T00:00:00`).toLocaleDateString("fr-FR", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })}
-            </span>
-          </div>
-
-          {(() => {
-            const start = new Date(`${dateDebut}T00:00:00`);
-            const end = new Date(`${dateFin}T00:00:00`);
-            const duration =
-              Math.round(
-                (end.getTime() - start.getTime()) /
-                  (1000 * 60 * 60 * 24)
-              ) + 1;
-
-            return (
-              <span className="rounded-full bg-background px-3 py-1 text-xs font-medium">
-                {duration} jour{duration > 1 ? "s" : ""}
+    {isValidDateString(dateDebut) && isValidDateString(dateFin) && (() => {
+      const start = parseDateSafeMidnight(dateDebut);
+      const end = parseDateSafeMidnight(dateFin);
+      if (!start || !end || end.getTime() < start.getTime()) return null;
+      return (
+        <div className="mt-4 rounded-xl bg-muted/50 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm">
+              <span className="text-muted-foreground">Période :</span>{" "}
+              <span className="font-medium">
+                {start.toLocaleDateString("fr-FR", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
               </span>
-            );
-          })()}
+              {" → "}
+              <span className="font-medium">
+                {end.toLocaleDateString("fr-FR", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+              </span>
+            </div>
+            {(() => {
+              const duration =
+                Math.round(
+                  (end.getTime() - start.getTime()) /
+                    (1000 * 60 * 60 * 24)
+                ) + 1;
+              if (!Number.isFinite(duration) || duration < 1) return null;
+              return (
+                <span className="rounded-full bg-background px-3 py-1 text-xs font-medium">
+                  {duration} jour{duration > 1 ? "s" : ""}
+                </span>
+              );
+            })()}
         </div>
       </div>
-    )}
+    );
+  })()}
 
     {/* Disponibilité */}
     {dateDebut && dateFin && (

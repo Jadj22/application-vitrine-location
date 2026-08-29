@@ -215,7 +215,7 @@ export default function SuiviPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="jean@example.com"
+                placeholder="votremail@domain.com"
                 className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
               />
             </div>

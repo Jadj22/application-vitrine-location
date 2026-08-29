@@ -619,7 +619,7 @@ export default function BookingPage() {
                 <label className="flex items-center gap-2 text-sm font-medium mb-1.5">
                   <Mail className="size-4 text-muted-foreground" /> Email *
                 </label>
-                <input name="clientEmail" type="email" required placeholder="jean@example.com" className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm" />
+                <input name="clientEmail" type="email" required placeholder="votremail@domain.com" className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm" />
                 {errors.clientEmail && <p className="mt-1 text-xs text-destructive">{errors.clientEmail}</p>}
               </div>
               <div>
