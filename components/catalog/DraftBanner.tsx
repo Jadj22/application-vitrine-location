@@ -5,8 +5,14 @@ import Link from "next/link";
 import { FilePenLine, X } from "lucide-react";
 import { loadDraft, clearDraft } from "@/lib/draft";
 
+type Draft = {
+  items?: { length: number };
+  dates?: { from?: string; to?: string };
+  updatedAt?: string;
+};
+
 export default function DraftBanner({ slug }: { slug: string }) {
-  const [draft, setDraft] = useState<any>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
@@ -40,7 +46,7 @@ export default function DraftBanner({ slug }: { slug: string }) {
           <div className="flex-1">
             <p className="text-sm font-semibold text-slate-900 dark:text-blue-100">Brouillon retrouvé</p>
             <p className="mt-1 text-sm font-medium text-slate-700 dark:text-blue-200">
-              {itemCount} article{itemCount > 1 ? "s" : ""} • {dates} • Dernière modif {new Date(draft.updatedAt).toLocaleString("fr-FR")}
+              {itemCount} article{itemCount > 1 ? "s" : ""} • {dates} • Dernière modif {draft.updatedAt ? new Date(draft.updatedAt).toLocaleString("fr-FR") : "Date inconnue"}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Link

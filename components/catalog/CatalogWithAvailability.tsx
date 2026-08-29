@@ -138,10 +138,8 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
     } catch (e) {
       console.error("[availability] fetch failed", e);
       setAvailabilityError(e instanceof Error ? e.message : "Erreur de disponibilité");
-      // Ne pas masquer le problème en mettant tout en indisponible silencieusement :
-      // On garde les données précédentes et on affiche l'erreur. Si aucune donnée
-      // précédente, on retombe sur initialItems mais l'erreur sera visible.
-      setItems(initialItems.map((i) => ({ ...i, total_stock: 0, disponible: 0, peut_reserver: false, reserves_pendant_periode: 0, booking_requests_pendantes: 0, en_entretien: 0, en_stock_physique: 0 })));
+      // Garde les données précédentes + erreur visible (pas de reset silencieux vers initialItems)
+      // Si aucune donnée précédente, items garde l'état initial (zéros)
     }
     setLoading(false);
   }, [slug, dateDebut, dateFin, initialItems]);

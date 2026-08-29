@@ -26,7 +26,6 @@ export async function POST(
     }
 
     // Log the share action
-    // In production, you would save this to a database
     const logEntry = {
       slug,
       method,
@@ -38,9 +37,6 @@ export async function POST(
     };
 
     console.log("[SHARE_LOG]", JSON.stringify(logEntry));
-
-    // TODO: Save to database
-    // await prisma.shareLog.create({ data: logEntry });
 
     return NextResponse.json({ success: true, logId: `share_${Date.now()}` });
   } catch (error) {
