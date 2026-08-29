@@ -31,6 +31,7 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
   const [loading, setLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const { addItem, isItemSelected, getItemQuantity, updateQuantity, totalItems, setIsOpen } = useSelection();
@@ -85,14 +86,21 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
   const fetchAvailability = useCallback(async () => {
     if (!dateDebut || !dateFin) {
       setItems(initialItems.map((i) => ({ ...i, total_stock: 0, disponible: 0, peut_reserver: false, reserves_pendant_periode: 0, booking_requests_pendantes: 0, en_entretien: 0, en_stock_physique: 0 })));
+      setAvailabilityError(null);
       return;
     }
 
     setLoading(true);
+    setAvailabilityError(null);
     try {
       const data = await catalog.availability(slug, dateDebut, dateFin);
       setItems(data);
-    } catch {
+    } catch (e) {
+      console.error("[availability] fetch failed", e);
+      setAvailabilityError(e instanceof Error ? e.message : "Erreur de disponibilité");
+      // Ne pas masquer le problème en mettant tout en indisponible silencieusement :
+      // On garde les données précédentes et on affiche l'erreur. Si aucune donnée
+      // précédente, on retombe sur initialItems mais l'erreur sera visible.
       setItems(initialItems.map((i) => ({ ...i, total_stock: 0, disponible: 0, peut_reserver: false, reserves_pendant_periode: 0, booking_requests_pendantes: 0, en_entretien: 0, en_stock_physique: 0 })));
     }
     setLoading(false);
@@ -346,6 +354,13 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
             <Loader2 className="size-4 animate-spin text-primary" />
             <span className="text-muted-foreground">
               Vérification de la disponibilité...
+            </span>
+          </>
+        ) : availabilityError ? (
+          <>
+            <span className="size-2 shrink-0 rounded-full bg-red-500" />
+            <span className="text-destructive text-sm">
+              Erreur: {availabilityError} — vérifiez la console réseau. Les badges &quot;Indisponible&quot; peuvent être faux.
             </span>
           </>
         ) : (
