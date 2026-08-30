@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, Share2 } from "lucide-react";
 import { catalog } from "@/lib/api";
 import { Price } from "@/components/ui/price";
+import ItemRecommendations from "@/components/catalog/ItemRecommendations";
 
 export default async function ItemPage({
   params,
@@ -173,6 +174,11 @@ export default async function ItemPage({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Recommendations Section */}
+      <div className="mx-auto max-w-6xl px-5 pb-20">
+        <ItemRecommendations slug={slug} itemId={item.id} />
       </div>
     </main>
   );
