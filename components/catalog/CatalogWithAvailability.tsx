@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
-import { ArrowRight, Calendar as CalendarIcon, Loader2, Package, Search, Plus, Check } from "lucide-react";
-import { catalog } from "@/lib/api";
-import type { PublicItem, CatalogAvailability } from "@/lib/api";
+import { ArrowRight, Calendar as CalendarIcon, Loader2, Package, Search, Plus, Check, Sparkles } from "lucide-react";
+import { catalog, publicSearch } from "@/lib/api";
+import type { PublicItem, CatalogAvailability, SearchIntentMetadata } from "@/lib/api";
+import SmartSearchBar from "@/components/catalog/SmartSearchBar";
 import { useSelection } from "@/lib/selection-context";
 import { Price } from "@/components/ui/price";
 import { Calendar } from "@/components/ui/calendar";
@@ -58,6 +59,9 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [smartMetadata, setSmartMetadata] = useState<SearchIntentMetadata | null>(null);
+  const [smartReasonsMap, setSmartReasonsMap] = useState<Record<string, string[]>>({});
+  const [isSmartSearching, setIsSmartSearching] = useState(false);
   const { addItem, isItemSelected, getItemQuantity, updateQuantity, totalItems, setIsOpen } = useSelection();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -150,10 +154,68 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
     }
   }, [dateDebut, dateFin, fetchAvailability]);
 
+  // Smart Search backend fetch avec debouncing
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSmartMetadata(null);
+      setSmartReasonsMap({});
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSmartSearching(true);
+      try {
+        const res = await publicSearch.search(slug, searchQuery, {
+          dateDebut: dateDebut || undefined,
+          dateFin: dateFin || undefined,
+          category: activeCategory || undefined,
+        });
+
+        if (res) {
+          setSmartMetadata(res.metadata || null);
+          const reasonsMap: Record<string, string[]> = {};
+          res.results.forEach((r) => {
+            if (r.match_reasons && r.match_reasons.length > 0) {
+              reasonsMap[r.id] = r.match_reasons;
+            }
+          });
+          setSmartReasonsMap(reasonsMap);
+
+          if (res.results && res.results.length > 0) {
+            const returnedIds = new Set(res.results.map((r) => r.id));
+            const smartList: CatalogAvailability[] = res.results.map((r) => ({
+              ...r,
+              total_stock: r.total_stock ?? 0,
+              disponible: r.disponible ?? (r.peut_reserver ? 1 : 0),
+              peut_reserver: r.peut_reserver ?? (r.statut === "ACTIF"),
+              reserves_pendant_periode: r.reserves_pendant_periode ?? 0,
+              booking_requests_pendantes: r.booking_requests_pendantes ?? 0,
+              en_entretien: r.en_entretien ?? 0,
+              en_stock_physique: r.total_stock ?? 0,
+            }));
+
+            setItems((prev) => {
+              const remaining = prev.filter((i) => !returnedIds.has(i.id));
+              return [...smartList, ...remaining];
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Smart search error:", err);
+      } finally {
+        setIsSmartSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, slug, dateDebut, dateFin, activeCategory]);
+
   const filteredItems = items.filter((item) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      if (!`${item.nom} ${item.public_description} ${item.category_nom ?? ""}`.toLowerCase().includes(q)) {
+      const hasDirectMatch = `${item.nom} ${item.public_description} ${item.category_nom ?? ""}`.toLowerCase().includes(q);
+      const hasSmartMatch = Boolean(smartReasonsMap[item.id]);
+      if (!hasDirectMatch && !hasSmartMatch) {
         return false;
       }
     }
@@ -438,15 +500,18 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
     )}
   </div>
 
-      {/* Search + filters */}
-      <div className="relative w-full lg:max-w-sm mt-5">
-        <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="search"
-          placeholder="Rechercher un article..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="h-12 w-full rounded-full border border-border bg-background pl-11 pr-5 text-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/10"
+      {/* Smart Search Bar */}
+      <div className="w-full mt-6">
+        <SmartSearchBar
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          metadata={smartMetadata}
+          loading={isSmartSearching}
+          onClear={() => {
+            setSearchQuery("");
+            setSmartMetadata(null);
+            setSmartReasonsMap({});
+          }}
         />
       </div>
 
@@ -563,6 +628,21 @@ export default function CatalogWithAvailability({ slug, initialItems, categories
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {item.public_description}
                   </p>
+
+                  {/* Smart Search Match Reasons */}
+                  {smartReasonsMap[item.id] && smartReasonsMap[item.id].length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {smartReasonsMap[item.id].slice(0, 2).map((reason, rIdx) => (
+                        <span
+                          key={rIdx}
+                          className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                        >
+                          <Sparkles className="size-2.5" />
+                          {reason}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="mt-5 flex items-center justify-between gap-3">
                     <div>

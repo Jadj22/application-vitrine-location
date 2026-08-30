@@ -159,6 +159,99 @@ export const publicCategories = {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Smart Search & Recommendations                                             */
+/* -------------------------------------------------------------------------- */
+
+export type SearchIntentMetadata = {
+  query?: string
+  intent?: string
+  event?: string | null
+  target?: {
+    relationship?: string
+    gender?: string
+    audience?: string
+    age?: number
+  } | null
+  attendees?: number | null
+  location?: string | null
+}
+
+export type SearchResultItem = PublicItem & {
+  score?: number
+  match_reasons?: string[]
+  total_stock?: number
+  disponible?: number
+  peut_reserver?: boolean
+  reserves_pendant_periode?: number
+  booking_requests_pendantes?: number
+  en_entretien?: number
+}
+
+export type SmartSearchResponse = {
+  count: number
+  next: string | null
+  previous: string | null
+  metadata: SearchIntentMetadata
+  results: SearchResultItem[]
+}
+
+export const publicSearch = {
+  async search(
+    slug: string,
+    query: string,
+    opts?: {
+      dateDebut?: string
+      dateFin?: string
+      category?: string
+      page?: number
+      pageSize?: number
+    }
+  ): Promise<SmartSearchResponse> {
+    const params = new URLSearchParams()
+    if (query) params.set("q", query)
+    if (opts?.dateDebut) params.set("date_debut", opts.dateDebut)
+    if (opts?.dateFin) params.set("date_fin", opts.dateFin)
+    if (opts?.category) params.set("category", opts.category)
+    if (opts?.page) params.set("page", String(opts.page))
+    if (opts?.pageSize) params.set("page_size", String(opts.pageSize))
+
+    const qs = params.toString()
+    return apiFetch<SmartSearchResponse>(`/public/b/${slug}/search/${qs ? `?${qs}` : ""}`)
+  },
+}
+
+export type ItemRecommendation = PublicItem & {
+  reason?: string
+}
+
+export type ItemRecommendationsResponse = {
+  item: { id: string; nom: string }
+  type: "SIMILAR" | "COMPLEMENTARY" | "USED_FOR" | "OFTEN_RENTED_TOGETHER"
+  default_reason?: string
+  recommendations: ItemRecommendation[]
+}
+
+export const publicRecommendations = {
+  async get(
+    slug: string,
+    itemId: string,
+    opts?: {
+      type?: "similar" | "complementary" | "used_for" | "often_rented_together"
+      limit?: number
+    }
+  ): Promise<ItemRecommendationsResponse> {
+    const params = new URLSearchParams()
+    if (opts?.type) params.set("type", opts.type)
+    if (opts?.limit) params.set("limit", String(opts.limit))
+
+    const qs = params.toString()
+    return apiFetch<ItemRecommendationsResponse>(
+      `/public/b/${slug}/items/${itemId}/recommendations/${qs ? `?${qs}` : ""}`
+    )
+  },
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Public Booking Requests                                                    */
 /* -------------------------------------------------------------------------- */
 
