@@ -1,12 +1,13 @@
-import { cn } from '@/lib/utils'
-import { BadgeHTMLAttributes, forwardRef } from 'react'
+import * as React from 'react';
+import { cn } from '@/lib/utils';
 
-export interface BadgeProps extends BadgeHTMLAttributes<HTMLSpanElement> {
-  variant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
+export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+  variant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
+  children?: React.ReactNode;
 }
 
-const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
-  ({ className, variant = 'default', ...props }, ref) => {
+const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
+  ({ className, variant = 'default', children, ...props }, ref) => {
     const variants = {
       default: 'bg-primary text-primary-foreground',
       secondary: 'bg-secondary text-secondary-foreground',
@@ -14,7 +15,7 @@ const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
       outline: 'border-border bg-transparent text-foreground border',
       success: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
       warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    }
+    };
 
     return (
       <span
@@ -25,10 +26,12 @@ const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
           className
         )}
         {...props}
-      />
-    )
+      >
+        {children}
+      </span>
+    );
   }
-)
-Badge.displayName = 'Badge'
+);
+Badge.displayName = 'Badge';
 
-export { Badge }
+export { Badge };

@@ -2,7 +2,7 @@
 
 import { getVisitorId } from "./visitor";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://application-gestion-backend.onrender.com/api";
 
 type ActiveResponse = {
   hasActiveRequest: boolean;

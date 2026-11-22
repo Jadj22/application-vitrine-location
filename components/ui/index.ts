@@ -26,3 +26,11 @@ export { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, Pagi
 export { Table, TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow } from './table'
 export { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from './form'
 export { Toaster } from './toaster'
+
+// Custom components
+export { KpiCard } from '@/components/KpiCard'
+export { DashboardTopBar } from '@/components/_DashboardTopBar'
+export { OperationalHeader } from '@/components/_OperationalHeader'
+export { HomeScreen } from '@/components/HomeScreen'
+export { ItemsScreen } from '@/components/ItemsScreen'
+export { QuickActionBottomSheet } from '@/components/QuickActionBottomSheet'

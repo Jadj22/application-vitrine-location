@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://dodome-backend.onrender.com/api"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://application-gestion-backend.onrender.com/api"
 
 type FetchOptions = {
   method?: string
