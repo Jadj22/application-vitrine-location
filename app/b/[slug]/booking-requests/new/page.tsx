@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams, useParams } from "next/navigation";
 import { ArrowRight, MapPin, User, Mail, Phone, MessageSquare, Package, Calendar as CalendarIcon, Loader2, X, Minus, Plus, Trash2, Share2, Send, AlertCircle, CheckCircle } from "lucide-react";
@@ -16,7 +16,7 @@ import type { PublicItem, BookingRequestResult } from "@/lib/api";
 import { useSelection } from "@/lib/selection-context";
 import { toast } from "sonner";
 import { ensureVisitorId } from "@/lib/visitor";
-import { saveDraft, loadDraft, clearDraft, ensureDraftId } from "@/lib/draft";
+import { saveDraft, loadDraft, clearDraft, ensureDraftId, type DraftData } from "@/lib/draft";
 import { useRequest } from "@/lib/request-context";
 import { getIdempotencyKey } from "@/lib/requestMemory";
 
@@ -24,7 +24,7 @@ export default function BookingPage() {
   const searchParams = useSearchParams();
   const { slug } = useParams<{ slug: string }>();
   const itemId = searchParams.get("item") || "";
-  const { selectedItems, removeItem, updateQuantity, clearSelection, getItemQuantity, isItemSelected, totalItems } = useSelection();
+  const { selectedItems, addItem, removeItem, updateQuantity, clearSelection, getItemQuantity, isItemSelected, totalItems } = useSelection();
 
   const [items, setItems] = useState<PublicItem[]>([]);
   const [sent, setSent] = useState(false);
@@ -39,80 +39,202 @@ export default function BookingPage() {
   const { hasActiveRequest, activeRequest, refresh: refreshRequest } = useRequest();
   const [showActiveBanner, setShowActiveBanner] = useState(true);
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [detectedDraft, setDetectedDraft] = useState<DraftData | null>(null);
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const initialCheckDone = useRef(false);
   const visitorId = typeof window !== "undefined" ? ensureVisitorId() : "";
   const draftId = slug ? ensureDraftId(slug as string) : "";
-  const hasShownDraftToast = useRef(false);
 
-  // Draft: restauration au chargement (brouillon vs demande) — single source, idempotent
+  // 1. Détection initiale au chargement (une seule fois au montage)
+  // Ne se déclenche JAMAIS pendant la saisie de l'utilisateur
   useEffect(() => {
-    if (!slug || draftLoaded) return;
-    const draft = loadDraft(slug as string);
-    if (draft) {
-      if (draft.dates?.from) setDateDebut(draft.dates.from);
-      if (draft.dates?.to) setDateFin(draft.dates.to);
-      // Restaurer les champs texte s'ils existent dans le DOM après hydratation
-      setTimeout(() => {
-        const form = document.querySelector("form") as HTMLFormElement | null;
-        if (!form) return;
-        if (draft.customer?.name) (form.elements.namedItem("clientNom") as HTMLInputElement | null)!.value = draft.customer.name;
-        if (draft.customer?.email) (form.elements.namedItem("clientEmail") as HTMLInputElement | null)!.value = draft.customer.email;
-        if (draft.customer?.phone) (form.elements.namedItem("clientTelephone") as HTMLInputElement | null)!.value = draft.customer.phone;
-        if (draft.lieu?.nom) (form.elements.namedItem("lieuNom") as HTMLInputElement | null)!.value = draft.lieu.nom;
-        if (draft.lieu?.adresse) (form.elements.namedItem("lieuAdresse") as HTMLInputElement | null)!.value = draft.lieu.adresse;
-        if (draft.lieu?.contactNom) (form.elements.namedItem("contactNom") as HTMLInputElement | null)!.value = draft.lieu.contactNom;
-        if (draft.lieu?.contactTelephone) (form.elements.namedItem("contactTelephone") as HTMLInputElement | null)!.value = draft.lieu.contactTelephone;
-        if (draft.lieu?.notes) (form.elements.namedItem("notesLivraison") as HTMLTextAreaElement | null)!.value = draft.lieu.notes;
-        if (draft.message) (form.elements.namedItem("message") as HTMLTextAreaElement | null)!.value = draft.message;
-      }, 100);
-      if ((draft.dates?.from || draft.customer?.name) && !hasShownDraftToast.current) {
-        hasShownDraftToast.current = true;
-        toast.info("Brouillon retrouvé", { id: "draft-restored", description: "Nous avons restauré votre demande en cours." });
+    if (!slug) return;
+
+    if (!initialCheckDone.current) {
+      initialCheckDone.current = true;
+      const existing = loadDraft(slug as string);
+      const hasMeaningfulContent = Boolean(
+        existing &&
+          ((existing.items && existing.items.length > 0) ||
+            existing.dates?.from ||
+            existing.dates?.to ||
+            existing.customer?.name ||
+            existing.customer?.email)
+      );
+
+      if (hasMeaningfulContent && existing) {
+        setDetectedDraft(existing);
+        setShowDraftBanner(true);
       }
     }
     setDraftLoaded(true);
-    // Vérifier demande active côté backend (source de vérité)
-    if (slug) refreshRequest(slug as string);
-  }, [slug, draftLoaded, refreshRequest]);
+    refreshRequest(slug as string);
+  }, [slug, refreshRequest]);
 
-  // Draft: sauvegarde auto à chaque changement (debounce 500ms) + beforeunload
+  // Restauration explicite du brouillon (action "Reprendre") sans reload
+  const restoreDraft = useCallback(
+    (draftToRestore: DraftData) => {
+      if (draftToRestore.dates?.from) setDateDebut(draftToRestore.dates.from);
+      if (draftToRestore.dates?.to) setDateFin(draftToRestore.dates.to);
+
+      const form = document.querySelector("form") as HTMLFormElement | null;
+      if (form) {
+        const setVal = (name: string, val?: string) => {
+          const el = form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | null;
+          if (el && val !== undefined) el.value = val;
+        };
+        setVal("clientNom", draftToRestore.customer?.name);
+        setVal("clientEmail", draftToRestore.customer?.email);
+        setVal("clientTelephone", draftToRestore.customer?.phone);
+        setVal("lieuNom", draftToRestore.lieu?.nom);
+        setVal("lieuAdresse", draftToRestore.lieu?.adresse);
+        setVal("contactNom", draftToRestore.lieu?.contactNom);
+        setVal("contactTelephone", draftToRestore.lieu?.contactTelephone);
+        setVal("notesLivraison", draftToRestore.lieu?.notes);
+        setVal("message", draftToRestore.message);
+      }
+
+      if (draftToRestore.items && draftToRestore.items.length > 0) {
+        catalog
+          .list(slug as string)
+          .then((allItems) => {
+            const restoredItems: PublicItem[] = [];
+            for (const dItem of draftToRestore.items) {
+              const fullItem = allItems.find((i) => i.id === dItem.id);
+              if (fullItem) {
+                restoredItems.push(fullItem);
+                if (!isItemSelected(fullItem.id)) {
+                  addItem(fullItem);
+                }
+                updateQuantity(fullItem.id, Math.max(1, dItem.quantity || 1));
+              }
+            }
+            if (restoredItems.length > 0) {
+              setItems((prev) => {
+                const merged = [...prev];
+                for (const r of restoredItems) {
+                  if (!merged.some((m) => m.id === r.id)) merged.push(r);
+                }
+                return merged;
+              });
+            }
+          })
+          .catch(() => {});
+      }
+
+      setShowDraftBanner(false);
+      toast.success("Brouillon restauré", {
+        id: "draft-action",
+        description: "Vos informations précédentes ont été récupérées.",
+      });
+    },
+    [slug, addItem, updateQuantity, isItemSelected]
+  );
+
+  // Annulation du brouillon (action "Recommencer") sans reload
+  const discardDraft = useCallback(() => {
+    clearDraft(slug as string);
+    setShowDraftBanner(false);
+    setDetectedDraft(null);
+
+    setDateDebut("");
+    setDateFin("");
+    const form = document.querySelector("form") as HTMLFormElement | null;
+    if (form) form.reset();
+
+    if (!itemId) {
+      clearSelection();
+      setItems([]);
+    } else {
+      // Conserver uniquement l'article courant de l'URL
+      setItems((prev) => prev.filter((it) => it.id === itemId));
+    }
+
+    toast.info("Brouillon effacé", {
+      id: "draft-action",
+      description: "Vous repartez sur une demande vierge.",
+    });
+  }, [slug, itemId, clearSelection]);
+
+  // 2. Sauvegarde automatique 100% discrète (debounce 500ms)
+  // Suspendue tant qu'un ancien brouillon est en attente de choix (Reprendre/Recommencer)
+  // afin de ne JAMAIS écraser le brouillon existant par un formulaire vierge !
   useEffect(() => {
-    if (!slug || !draftLoaded) return;
+    if (!slug || !draftLoaded || showDraftBanner) return;
+
     const timeout = setTimeout(() => {
       const form = document.querySelector("form") as HTMLFormElement | null;
       if (!form) return;
       const fd = new FormData(form);
+
+      const nom = String(fd.get("clientNom") || "").trim();
+      const email = String(fd.get("clientEmail") || "").trim();
+      const phone = String(fd.get("clientTelephone") || "").trim();
+      const message = String(fd.get("message") || "").trim();
+      const lieuNom = String(fd.get("lieuNom") || "").trim();
+      const lieuAdresse = String(fd.get("lieuAdresse") || "").trim();
+
+      // Ne pas persister un brouillon vide
+      const hasContent =
+        items.length > 0 ||
+        Boolean(dateDebut) ||
+        Boolean(dateFin) ||
+        Boolean(nom) ||
+        Boolean(email) ||
+        Boolean(phone) ||
+        Boolean(message) ||
+        Boolean(lieuNom) ||
+        Boolean(lieuAdresse);
+
+      if (!hasContent) return;
+
       saveDraft(slug as string, {
         dates: { from: dateDebut, to: dateFin },
         customer: {
-          name: String(fd.get("clientNom") || ""),
-          email: String(fd.get("clientEmail") || ""),
-          phone: String(fd.get("clientTelephone") || ""),
+          name: nom,
+          email: email,
+          phone: phone,
         },
         lieu: {
-          nom: String(fd.get("lieuNom") || ""),
-          adresse: String(fd.get("lieuAdresse") || ""),
+          nom: lieuNom,
+          adresse: lieuAdresse,
           contactNom: String(fd.get("contactNom") || ""),
           contactTelephone: String(fd.get("contactTelephone") || ""),
           notes: String(fd.get("notesLivraison") || ""),
         },
-        message: String(fd.get("message") || ""),
-        items: items.map((it) => ({ id: it.id, nom: it.nom, quantity: getItemQuantity(it.id) })),
+        message: message,
+        items: items.map((it) => ({
+          id: it.id,
+          nom: it.nom,
+          quantity: Math.max(1, getItemQuantity(it.id)),
+        })),
       });
-    }, 500);
-    return () => clearTimeout(timeout);
-  }, [slug, dateDebut, dateFin, items, draftLoaded, getItemQuantity]);
 
+      setLastSaved(new Date());
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [slug, dateDebut, dateFin, items, draftLoaded, showDraftBanner, getItemQuantity]);
+
+  // 3. Sauvegarde de sécurité lors de la fermeture ou changement de page
+  // Suspendue si le bandeau de choix est affiché afin de protéger le brouillon existant
   useEffect(() => {
     const onBeforeUnload = () => {
-      if (!slug) return;
+      if (!slug || showDraftBanner) return;
       const form = document.querySelector("form") as HTMLFormElement | null;
       if (!form) return;
       const fd = new FormData(form);
+      const nom = String(fd.get("clientNom") || "").trim();
+      const email = String(fd.get("clientEmail") || "").trim();
+      const hasContent = items.length > 0 || Boolean(dateDebut) || Boolean(dateFin) || Boolean(nom) || Boolean(email);
+      if (!hasContent) return;
+
       saveDraft(slug as string, {
         dates: { from: dateDebut, to: dateFin },
         customer: {
-          name: String(fd.get("clientNom") || ""),
-          email: String(fd.get("clientEmail") || ""),
+          name: nom,
+          email: email,
           phone: String(fd.get("clientTelephone") || ""),
         },
         lieu: {
@@ -123,35 +245,61 @@ export default function BookingPage() {
           notes: String(fd.get("notesLivraison") || ""),
         },
         message: String(fd.get("message") || ""),
-        items: items.map((it) => ({ id: it.id, nom: it.nom, quantity: getItemQuantity(it.id) })),
+        items: items.map((it) => ({
+          id: it.id,
+          nom: it.nom,
+          quantity: Math.max(1, getItemQuantity(it.id)),
+        })),
       });
     };
-    const onPopState = () => onBeforeUnload();
     window.addEventListener("beforeunload", onBeforeUnload);
-    window.addEventListener("popstate", onPopState);
+    window.addEventListener("popstate", onBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
-      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("popstate", onBeforeUnload);
     };
-  }, [slug, dateDebut, dateFin, items, getItemQuantity]);
+  }, [slug, dateDebut, dateFin, items, showDraftBanner, getItemQuantity]);
 
   // Load selected items on mount
   useEffect(() => {
     if (slug) {
       catalog.list(slug).then((allItems) => {
+        const currentItems: PublicItem[] = [];
+        if (itemId) {
+          const single = allItems.find((i) => i.id === itemId);
+          if (single) {
+            if (!isItemSelected(single.id)) {
+              addItem(single);
+            } else if (getItemQuantity(single.id) === 0) {
+              updateQuantity(single.id, 1);
+            }
+            currentItems.push(single);
+          }
+        }
+
         const selected = allItems.filter((i) => isItemSelected(i.id));
         if (selected.length > 0) {
-          setItems(selected);
-        } else if (itemId) {
-          // Fallback to single item from URL param
-          const single = allItems.find((i) => i.id === itemId);
-          if (single) setItems([single]);
+          // Ensure every selected item has at least quantity 1
+          for (const s of selected) {
+            if (getItemQuantity(s.id) === 0) {
+              updateQuantity(s.id, 1);
+            }
+          }
+          const merged = [...selected];
+          for (const it of currentItems) {
+            if (!merged.some((m) => m.id === it.id)) {
+              merged.push(it);
+            }
+          }
+          setItems(merged);
+        } else if (currentItems.length > 0) {
+          setItems(currentItems);
         }
       });
       // Load business info for sharing
       publicBusiness.get(slug).then(setBusinessInfo).catch(() => {});
     }
-  }, [slug, itemId, isItemSelected]);
+  }, [slug, itemId, isItemSelected, addItem, getItemQuantity, updateQuantity]);
 
   async function submitAll(e: React.FormEvent) {
     e.preventDefault();
@@ -216,7 +364,7 @@ export default function BookingPage() {
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const qty = getItemQuantity(item.id);
+      const qty = Math.max(1, getItemQuantity(item.id));
       setCurrentIndex(i);
       const idempotencyKey = getIdempotencyKey(slug as string, item.id, currentDraftId);
 
@@ -306,6 +454,8 @@ export default function BookingPage() {
     if (!hasError) {
       // Succès : nettoyer le brouillon (DRAFT -> PENDING)
       clearDraft(slug as string);
+      setDetectedDraft(null);
+      setShowDraftBanner(false);
       // Store form data for sharing (use the `data` FormData created at start)
       const formDataObj: Record<string, string> = {};
       data.forEach((value, key) => {
@@ -497,6 +647,13 @@ export default function BookingPage() {
         {items.length > 1 ? "Vos articles sélectionnés" : "Parlons de votre projet."}
       </h1>
 
+      {lastSaved && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-emerald-500" />
+          <span>Brouillon sauvegardé automatiquement</span>
+        </div>
+      )}
+
       {/* Mémoire : demande active détectée (source backend) */}
       {hasActiveRequest && activeRequest && showActiveBanner && (
         <div className="mt-6 rounded-2xl border border-amber-300 bg-white p-4 shadow-sm dark:border-amber-800 dark:bg-amber-950/40">
@@ -538,19 +695,47 @@ export default function BookingPage() {
         </div>
       )}
 
-      {/* Brouillon retrouvé */}
-      {draftLoaded && !hasActiveRequest && (() => { const d = loadDraft(slug as string); return d && d.items.length > 0 ? (
+      {/* Proposition de reprise d'un brouillon antérieur préexistant */}
+      {showDraftBanner && detectedDraft && !hasActiveRequest && (
         <div className="mt-6 rounded-2xl border border-blue-300 bg-white p-4 shadow-sm dark:border-blue-800 dark:bg-blue-950/40">
-          <p className="text-sm font-semibold text-slate-900 dark:text-blue-100">Brouillon retrouvé</p>
-          <p className="mt-1 text-sm font-medium text-slate-700 dark:text-blue-200">
-            Nous avons retrouvé votre demande en cours ({d.items.length} article{d.items.length>1?"s":""} • {d.dates.from && d.dates.to ? `${d.dates.from} → ${d.dates.to}` : "dates non définies"} • Dernière modif {new Date(d.updatedAt).toLocaleString("fr-FR")}).
-          </p>
-          <div className="mt-3 flex gap-2">
-            <button onClick={() => window.location.reload()} className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700">Reprendre</button>
-            <button onClick={() => { clearDraft(slug as string); window.location.reload(); }} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200">Recommencer</button>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-blue-100">
+                Brouillon antérieur retrouvé
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-700 dark:text-blue-200">
+                Vous avez une demande non finalisée ({detectedDraft.items.length} article{detectedDraft.items.length > 1 ? "s" : ""}
+                {detectedDraft.dates?.from && detectedDraft.dates?.to ? ` • du ${detectedDraft.dates.from} au ${detectedDraft.dates.to}` : ""}
+                {detectedDraft.updatedAt ? ` • enregistrée le ${new Date(detectedDraft.updatedAt).toLocaleDateString("fr-FR")} à ${new Date(detectedDraft.updatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}).
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => restoreDraft(detectedDraft)}
+                  className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+                >
+                  Reprendre le brouillon
+                </button>
+                <button
+                  type="button"
+                  onClick={discardDraft}
+                  className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200 transition"
+                >
+                  Recommencer à zéro
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDraftBanner(false)}
+              className="shrink-0 text-slate-400 hover:text-slate-600 dark:text-blue-300"
+              aria-label="Ignorer et fermer"
+            >
+              <X className="size-4" />
+            </button>
           </div>
         </div>
-      ) : null; })()}
+      )}
 
       {/* Selected items summary */}
       {items.length > 0 ? (
@@ -572,13 +757,50 @@ export default function BookingPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{item.nom}</p>
-                <p className="text-sm text-muted-foreground">
-                  Quantité : <span className="font-semibold text-foreground">{getItemQuantity(item.id)}</span> {item.unite}
+                <p className="text-xs text-muted-foreground">
+                  {item.prix ? `${item.prix.toLocaleString("fr-FR")} FCFA / ${item.unite}` : item.unite}
                 </p>
               </div>
+
+              {/* Stepper Quantité (+ / -) */}
+              <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = getItemQuantity(item.id);
+                    if (current > 1) {
+                      updateQuantity(item.id, current - 1);
+                    }
+                  }}
+                  disabled={getItemQuantity(item.id) <= 1}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition"
+                  aria-label={`Diminuer la quantité de ${item.nom}`}
+                >
+                  <Minus className="size-3.5" />
+                </button>
+                <span className="min-w-7 text-center text-sm font-semibold tabular-nums text-foreground">
+                  {Math.max(1, getItemQuantity(item.id))}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = Math.max(1, getItemQuantity(item.id));
+                    updateQuantity(item.id, current + 1);
+                  }}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground transition"
+                  aria-label={`Augmenter la quantité de ${item.nom}`}
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              </div>
+
               <button
-                onClick={() => removeItem(item.id)}
-                className="inline-flex size-8 items-center justify-center rounded-lg border border-destructive/50 bg-destructive/10 text-destructive transition hover:bg-destructive/20"
+                type="button"
+                onClick={() => {
+                  removeItem(item.id);
+                  setItems((prev) => prev.filter((it) => it.id !== item.id));
+                }}
+                className="inline-flex size-8 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 text-destructive transition hover:bg-destructive/20"
                 aria-label={`Retirer ${item.nom}`}
               >
                 <X className="size-4" />
